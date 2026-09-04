@@ -397,6 +397,7 @@ const elements = {
   weeklyTotal: $('#weekly-total'), weeklyStatus: $('#weekly-status'), weeklyProgress: $('#weekly-progress'),
   weeklyTargetLabel: $('#weekly-target-label'), weeklyBalance: $('#weekly-balance'), proposedEnd: $('#proposed-end'),
   proposedEndDetail: $('#proposed-end-detail'),
+  currentWeekBalance: $('#current-week-balance'), currentWeekDetail: $('#current-week-detail'),
   todayTimer: $('#today-timer'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
   weekCount: $('#week-count'),
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
@@ -458,11 +459,28 @@ function render() {
   const proposedEnd = proposedEndDetails(state, now);
   elements.proposedEnd.textContent = proposedEnd.time;
   elements.proposedEndDetail.textContent = proposedEnd.detail;
+  const currentWeek = currentWeekBalanceDetails(state, now);
+  elements.currentWeekBalance.className = `summary-value ${balanceClass(currentWeek.balance)}`;
+  elements.currentWeekBalance.textContent = formatSignedBalance(currentWeek.balance);
+  elements.currentWeekDetail.textContent = `${currentWeek.includeToday ? 'Week to date' : 'Through yesterday'}: ${formatDuration(currentWeek.worked)} / ${formatDuration(currentWeek.target)}`;
   renderTodayTimer(state, now);
   elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
   renderSettings(state);
   showStorageError(loaded.error || (adapter.available ? '' : 'Browser storage is unavailable. Data will not persist after refresh.'));
+}
+
+function currentWeekBalanceDetails(state, now) {
+  const { start } = getWeekRange(now);
+  const todayKey = dateKeyFromDate(now);
+  const today = dateFromKey(todayKey);
+  const includeToday = !state.activeTimer && entriesForDate(state.entries, todayKey).length > 0;
+  const through = new Date(today);
+  if (!includeToday) through.setDate(through.getDate() - 1);
+  const hasCurrentWeekDates = through >= start;
+  const target = hasCurrentWeekDates ? targetMinutesThroughDate(state.settings, state.entries, start, through) : 0;
+  const worked = hasCurrentWeekDates ? weeklyWorkedMinutes(state.entries, state.activeTimer, start, through, now) : 0;
+  return { balance: worked - target, worked, target, includeToday };
 }
 
 function proposedEndDetails(state, now) {

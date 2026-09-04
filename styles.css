@@ -55,7 +55,7 @@ h3 { margin-bottom: .35rem; font-size: 1rem; }
 .notice { padding: 11px 14px; border-radius: 9px; font-size: .9rem; margin-bottom: 16px; }
 .notice-error { background: var(--negative-soft); color: var(--negative); border: 1px solid color-mix(in srgb, var(--negative) 25%, transparent); }
 .notice-info { background: var(--accent-soft); color: var(--accent-strong); }
-.summary-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.summary-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
 .summary-card, .day-card, .settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
 .summary-card { padding: 20px; min-height: 158px; }
 .summary-card-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
