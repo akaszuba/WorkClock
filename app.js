@@ -208,7 +208,7 @@ function isEntry(value) {
   if (value.source === 'vacation') return value.start === null && value.end === null && value.durationMinutes > 0;
   if (value.start === null && value.end === null) return value.durationMinutes > 0;
   if (!isIsoString(value.start) || !isIsoString(value.end)) return false;
-  return new Date(value.end) > new Date(value.start) && value.durationMinutes > 0;
+  return new Date(value.end) > new Date(value.start) && value.durationMinutes >= 0;
 }
 
 function validateDocument(value) {
@@ -514,9 +514,11 @@ function formatElapsed(startedAt, now = new Date()) {
 
 function renderSettings(state) {
   elements.weekdayTargets.innerHTML = [1, 2, 3, 4, 5, 6, 0].map((day) => {
-    const date = new Date(2024, 0, day === 0 ? 7 : day + 1);
+    // 2024-01-01 is a Monday. Use the day index directly so Saturday and
+    // Sunday do not resolve to the same reference date.
+    const date = new Date(2024, 0, day === 0 ? 7 : day);
     const label = date.toLocaleDateString(undefined, { weekday: 'short' });
-    return `<label>${label}<input name="weekday-target-${day}" type="number" min="0" max="24" step="0.25" value="${state.settings.weekdayTargetMinutes[day] / 60}" required></label>`;
+    return `<label>${label}<input name="weekday-target-${day}" type="number" min="0" max="24" step="any" inputmode="decimal" value="${state.settings.weekdayTargetMinutes[day] / 60}" required></label>`;
   }).join('');
 }
 
@@ -646,7 +648,9 @@ function saveSettings(event) {
   try {
     const weekdayTargetMinutes = {};
     for (const day of [0, 1, 2, 3, 4, 5, 6]) {
-      const hours = Number(elements.settingsForm.querySelector(`[name="weekday-target-${day}"]`).value);
+      const field = elements.settingsForm.querySelector(`[name="weekday-target-${day}"]`);
+      if (!field.value.trim()) throw new Error('Daily targets are required.');
+      const hours = Number(field.value);
       if (!Number.isFinite(hours) || hours < 0 || hours > 24) throw new Error('Daily targets must be between 0 and 24 hours.');
       weekdayTargetMinutes[day] = Math.round(hours * 60);
     }
