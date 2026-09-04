@@ -81,13 +81,15 @@ h3 { margin-bottom: .35rem; font-size: 1rem; }
 .entry-list { display: grid; gap: 7px; min-height: 45px; }
 .entry-row { padding: 9px; background: var(--surface-alt); border-radius: 8px; font-size: .77rem; }
 .entry-row.running { background: var(--accent-soft); }
+.entry-row.vacation-entry { background: var(--positive-soft); }
 .entry-main { display: flex; justify-content: space-between; gap: 4px; font-weight: 800; }
 .entry-note { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 .entry-actions { display: flex; gap: 4px; margin-top: 7px; }
 .text-button { border: 0; padding: 0; background: transparent; color: var(--accent-strong); font-size: .75rem; font-weight: 800; }
 .text-button.delete { color: var(--negative); }
 .empty-day { color: var(--muted); font-size: .78rem; padding: 10px 0 12px; }
-.day-actions { margin-top: 15px; width: 100%; }
+.day-actions { display: grid; gap: 7px; margin-top: 15px; width: 100%; }
+.vacation-action { color: var(--positive); }
 .day-actions .button { width: 100%; min-height: 36px; padding: 6px 8px; font-size: .78rem; }
 .timer-button { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent-strong); }
 .tools-grid { display: grid; grid-template-columns: minmax(220px, .8fr) 1.2fr; gap: 14px; margin-top: 15px; }

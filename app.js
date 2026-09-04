@@ -235,9 +235,10 @@ function isIsoString(value) {
 function isEntry(value) {
   if (!value || typeof value !== 'object') return false;
   if (typeof value.id !== 'string' || !value.id || !dateFromKey(value.date)) return false;
-  if (!['manual', 'timer'].includes(value.source)) return false;
+  if (!['manual', 'timer', 'vacation'].includes(value.source)) return false;
   if (typeof value.note !== 'string' || value.note.length > 120) return false;
   if (!Number.isInteger(value.durationMinutes) || value.durationMinutes < 0) return false;
+  if (value.source === 'vacation') return value.start === null && value.end === null && value.durationMinutes > 0;
   if (value.start === null && value.end === null) return value.durationMinutes > 0;
   if (!isIsoString(value.start) || !isIsoString(value.end)) return false;
   return new Date(value.end) > new Date(value.start) && value.durationMinutes > 0;
@@ -301,6 +302,11 @@ function loadState(adapter = createLocalStorageAdapter()) {
 }
 
 function assertNoOverlap(entries, candidate, ignoreId = null) {
+  const sameDayEntry = entries.some((entry) => entry.id !== ignoreId && entry.date === candidate.date);
+  if (candidate.source === 'vacation' && sameDayEntry) throw new Error('This day already has an entry.');
+  if (candidate.source !== 'vacation' && entries.some((entry) => entry.id !== ignoreId && entry.date === candidate.date && entry.source === 'vacation')) {
+    throw new Error('This day is marked as vacation.');
+  }
   if (!candidate.start || !candidate.end) return;
   const start = new Date(candidate.start).getTime();
   const end = new Date(candidate.end).getTime();
@@ -333,6 +339,14 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
     addEntry(input) {
       const entry = { id: input.id || createId(), date: input.date, start: input.start ?? null, end: input.end ?? null, durationMinutes: input.durationMinutes, note: input.note || '', source: input.source || 'manual' };
       if (!isEntry(entry)) throw new Error('Entry details are invalid.');
+      assertNoOverlap(state.entries, entry);
+      return mutate(() => state.entries.push(entry));
+    },
+    addVacation(date, note = '') {
+      const durationMinutes = dailyTargetMinutes(state.settings, date);
+      if (!durationMinutes) throw new Error('Vacation can only be added on a day with a daily target.');
+      const entry = { id: createId(), date, start: null, end: null, durationMinutes, note: note || '', source: 'vacation' };
+      if (!isEntry(entry)) throw new Error('Vacation details are invalid.');
       assertNoOverlap(state.entries, entry);
       return mutate(() => state.entries.push(entry));
     },
@@ -415,7 +429,7 @@ const elements = {
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
   entryStart: $('#entry-start'), entryEnd: $('#entry-end'), entryDuration: $('#entry-duration'), entryNote: $('#entry-note'),
   entryDialogTitle: $('#entry-dialog-title'), formError: $('#form-error'), startField: $('#start-field'), endField: $('#end-field'),
-  durationField: $('#duration-field'), settingsForm: $('#settings-form'),
+  durationField: $('#duration-field'), vacationHelp: $('#vacation-help'), settingsForm: $('#settings-form'),
   weekdayTargets: $('#weekday-targets'), importData: $('#import-data'),
 };
 
@@ -513,13 +527,13 @@ function renderDay(state, dateKey, now) {
     <div class="day-balance ${balanceClass(balance)}">${target ? escapeHtml(formatSignedBalance(balance)) : `${formatDuration(worked)} logged`}</div>
     <div class="entry-list">${runningMarkup}${entryMarkup || (!runningMarkup ? '<div class="empty-day">No entries yet</div>' : '')}</div>
     ${actionMarkup}
-    ${!isToday ? `<button class="text-button day-actions" type="button" data-action="add-entry" data-date="${dateKey}">+ Add manual entry</button>` : '<button class="text-button day-actions" type="button" data-action="add-entry" data-date="'+dateKey+'">+ Add manual entry</button>'}
+    <div class="day-actions"><button class="text-button" type="button" data-action="add-entry" data-date="${dateKey}">+ Add manual entry</button><button class="text-button vacation-action" type="button" data-action="add-vacation" data-date="${dateKey}">+ Add full-day vacation</button></div>
   </article>`;
 }
 
 function renderEntry(entry) {
-  const timeText = entry.start && entry.end ? `${formatTime(entry.start)} - ${formatTime(entry.end)}` : `${formatDuration(entry.durationMinutes)} - duration only`;
-  return `<div class="entry-row"><div class="entry-main"><span>${escapeHtml(timeText)}</span><span>${formatDuration(entry.durationMinutes, { compact: true })}</span></div>${entry.note ? `<div class="entry-note" title="${escapeHtml(entry.note)}">${escapeHtml(entry.note)}</div>` : ''}<div class="entry-actions"><button class="text-button" type="button" data-action="edit-entry" data-id="${escapeHtml(entry.id)}">Edit</button><button class="text-button delete" type="button" data-action="delete-entry" data-id="${escapeHtml(entry.id)}">Delete</button></div></div>`;
+  const timeText = entry.source === 'vacation' ? 'Vacation - Full day' : entry.start && entry.end ? `${formatTime(entry.start)} - ${formatTime(entry.end)}` : `${formatDuration(entry.durationMinutes)} - duration only`;
+  return `<div class="entry-row ${entry.source === 'vacation' ? 'vacation-entry' : ''}"><div class="entry-main"><span>${escapeHtml(timeText)}</span><span>${formatDuration(entry.durationMinutes, { compact: true })}</span></div>${entry.note ? `<div class="entry-note" title="${escapeHtml(entry.note)}">${escapeHtml(entry.note)}</div>` : ''}<div class="entry-actions"><button class="text-button" type="button" data-action="edit-entry" data-id="${escapeHtml(entry.id)}">Edit</button><button class="text-button delete" type="button" data-action="delete-entry" data-id="${escapeHtml(entry.id)}">Delete</button></div></div>`;
 }
 
 function formatElapsed(startedAt, now = new Date()) {
@@ -541,23 +555,28 @@ function renderSettings(state) {
 function toggleEntryMode() {
   const mode = elements.entryForm.querySelector('input[name="entry-mode"]:checked').value;
   const durationMode = mode === 'duration';
-  elements.startField.hidden = durationMode;
-  elements.endField.hidden = durationMode;
+  const vacationMode = mode === 'vacation';
+  elements.startField.hidden = durationMode || vacationMode;
+  elements.endField.hidden = durationMode || vacationMode;
   elements.durationField.hidden = !durationMode;
-  elements.entryStart.required = !durationMode;
-  elements.entryEnd.required = !durationMode;
+  elements.vacationHelp.hidden = !vacationMode;
+  elements.entryStart.required = !durationMode && !vacationMode;
+  elements.entryEnd.required = !durationMode && !vacationMode;
   elements.entryDuration.required = durationMode;
+  elements.entryForm.querySelector('button[type="submit"]').textContent = vacationMode ? 'Save vacation' : 'Save entry';
 }
 
-function openEntryDialog(dateKey, entryId = '') {
+function openEntryDialog(dateKey, entryId = '', requestedMode = 'interval') {
   const entry = entryId ? store.getState().entries.find((item) => item.id === entryId) : null;
   elements.entryForm.reset();
   showError('');
   elements.entryId.value = entry?.id || '';
   elements.entryDate.value = entry?.date || dateKey;
   elements.entryNote.value = entry?.note || '';
-  elements.entryDialogTitle.textContent = entry ? 'Edit entry' : 'Add entry';
-  if (entry?.start && entry?.end) {
+  elements.entryDialogTitle.textContent = entry ? (entry.source === 'vacation' ? 'Edit vacation' : 'Edit entry') : requestedMode === 'vacation' ? 'Add vacation' : 'Add entry';
+  if (entry?.source === 'vacation') {
+    elements.entryForm.querySelector('input[value="vacation"]').checked = true;
+  } else if (entry?.start && entry?.end) {
     elements.entryForm.querySelector('input[value="interval"]').checked = true;
     elements.entryStart.value = localTimeValue(entry.start);
     elements.entryEnd.value = localTimeValue(entry.end);
@@ -565,7 +584,7 @@ function openEntryDialog(dateKey, entryId = '') {
     elements.entryForm.querySelector('input[value="duration"]').checked = true;
     elements.entryDuration.value = String(entry.durationMinutes);
   } else {
-    elements.entryForm.querySelector('input[value="interval"]').checked = true;
+    elements.entryForm.querySelector(`input[value="${requestedMode}"]`).checked = true;
   }
   toggleEntryMode();
   elements.entryDialog.showModal();
@@ -584,7 +603,11 @@ function saveEntry(event) {
   if (!dateFromKey(date)) return showError('Choose a valid date.');
   const mode = elements.entryForm.querySelector('input[name="entry-mode"]:checked').value;
   const input = { date, note: elements.entryNote.value.trim(), source: 'manual' };
-  if (mode === 'duration') {
+  if (mode === 'vacation') {
+    input.source = 'vacation'; input.start = null; input.end = null;
+    input.durationMinutes = dailyTargetMinutes(store.getState().settings, date);
+    if (!input.durationMinutes) return showError('Vacation can only be added on a day with a daily target.');
+  } else if (mode === 'duration') {
     const duration = Number(elements.entryDuration.value);
     if (!Number.isInteger(duration) || duration < 1) return showError('Duration must be a whole number of minutes greater than zero.');
     input.durationMinutes = duration; input.start = null; input.end = null;
@@ -596,9 +619,11 @@ function saveEntry(event) {
     input.durationMinutes = Math.round((new Date(input.end) - new Date(input.start)) / 60000);
   }
   try {
-    if (elements.entryId.value) store.updateEntry(elements.entryId.value, input); else store.addEntry(input);
+    if (elements.entryId.value) store.updateEntry(elements.entryId.value, input);
+    else if (mode === 'vacation') store.addVacation(date, input.note);
+    else store.addEntry(input);
     elements.entryDialog.close();
-    announce('Entry saved.');
+    announce(mode === 'vacation' ? 'Vacation saved.' : 'Entry saved.');
     render();
   } catch (error) { showError(error.message); showStorageError(error.message); }
 }
@@ -609,6 +634,7 @@ function handleDayAction(event) {
   const action = control.dataset.action;
   try {
     if (action === 'add-entry') openEntryDialog(control.dataset.date);
+    if (action === 'add-vacation') openEntryDialog(control.dataset.date, '', 'vacation');
     if (action === 'edit-entry') openEntryDialog('', control.dataset.id);
     if (action === 'delete-entry') {
       if (window.confirm('Delete this entry? This cannot be undone.')) { store.deleteEntry(control.dataset.id); announce('Entry deleted.'); render(); }

@@ -118,10 +118,12 @@
           <legend>Entry type</legend>
           <label class="radio-label"><input type="radio" name="entry-mode" value="interval" checked> Start and end time</label>
           <label class="radio-label"><input type="radio" name="entry-mode" value="duration"> Duration only</label>
+          <label class="radio-label"><input type="radio" name="entry-mode" value="vacation"> Full-day vacation</label>
         </fieldset>
         <label id="start-field">Start time<input id="entry-start" type="time"></label>
         <label id="end-field">End time<input id="entry-end" type="time"></label>
         <label id="duration-field" hidden>Duration (minutes)<input id="entry-duration" type="number" min="1" step="1" inputmode="numeric"></label>
+        <p id="vacation-help" class="summary-help full-field" hidden>Vacation is logged for the date's configured daily target.</p>
         <label class="full-field">Note / project <span class="muted">(optional)</span><input id="entry-note" type="text" maxlength="120" autocomplete="off"></label>
       </div>
       <div class="dialog-actions">
