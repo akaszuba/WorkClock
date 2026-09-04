@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A private, browser-only work time tracker.">
+  <title>WorkClock</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="shell header-inner">
+      <div>
+        <p class="eyebrow">Private time tracking</p>
+        <h1>WorkClock</h1>
+      </div>
+      <div class="header-total" aria-label="Selected week total">
+        <span class="muted">This week</span>
+        <strong id="header-total">0 h 00 m / 40 h</strong>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell" id="main-content">
+    <section class="week-toolbar" aria-labelledby="week-heading">
+      <div class="week-heading-wrap">
+        <p class="eyebrow">Selected week</p>
+        <h2 id="week-heading">Week</h2>
+      </div>
+      <div class="week-actions" aria-label="Week navigation">
+        <button class="button button-secondary" id="previous-week" type="button" aria-label="Previous week">← <span class="hide-small">Previous</span></button>
+        <button class="button button-secondary" id="today-week" type="button">Today</button>
+        <button class="button button-secondary" id="next-week" type="button" aria-label="Next week"><span class="hide-small">Next</span> →</button>
+      </div>
+    </section>
+
+    <div id="storage-error" class="notice notice-error" role="alert" hidden></div>
+
+    <section class="summary-grid" aria-labelledby="summary-heading">
+      <h2 id="summary-heading" class="sr-only">Week summary</h2>
+      <article class="summary-card summary-card-wide">
+        <div class="summary-card-top">
+          <div>
+            <span class="card-label">Weekly progress</span>
+            <p class="metric" id="weekly-total">0 h 00 m</p>
+          </div>
+          <span class="status-pill status-neutral" id="weekly-status">0 h 00 m remaining</span>
+        </div>
+        <div class="progress-track" role="progressbar" aria-label="Weekly target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="weekly-progress">
+          <span></span>
+        </div>
+        <div class="summary-meta"><span id="weekly-target-label">Target: 40 h</span><span id="weekly-balance">0 h 00 m under</span></div>
+      </article>
+      <article class="summary-card">
+        <span class="card-label">Today’s proposed end</span>
+        <p class="summary-value" id="proposed-end">—</p>
+        <p class="summary-help">Assuming continuous work from now</p>
+      </article>
+      <article class="summary-card">
+        <span class="card-label">Projection</span>
+        <p class="summary-value" id="week-projection">—</p>
+        <p class="summary-help">An estimate, not a commitment</p>
+      </article>
+    </section>
+
+    <section class="days-section" aria-labelledby="days-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Your week</p>
+          <h2 id="days-heading">Daily records</h2>
+        </div>
+        <span class="muted" id="week-count">7 days</span>
+      </div>
+      <div id="days" class="days-grid"></div>
+    </section>
+
+    <section class="tools-section" aria-labelledby="tools-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Control center</p>
+          <h2 id="tools-heading">Settings &amp; backup</h2>
+        </div>
+      </div>
+      <div class="tools-grid">
+        <details class="settings-card">
+          <summary>Targets</summary>
+          <form id="settings-form" class="settings-form">
+            <label>Weekly target (hours)<input id="weekly-target-input" type="number" min="0" max="168" step="0.25" required></label>
+            <div class="weekday-targets" id="weekday-targets"></div>
+            <button class="button button-primary" type="submit">Save targets</button>
+          </form>
+        </details>
+        <div class="settings-card backup-card">
+          <div>
+            <h3>Backup your data</h3>
+            <p class="summary-help">Everything stays in this browser. Export a JSON copy before moving devices or clearing site data.</p>
+          </div>
+          <div class="backup-actions">
+            <button class="button button-secondary" id="export-data" type="button">Export JSON</button>
+            <label class="button button-secondary file-button">Import JSON<input id="import-data" type="file" accept="application/json,.json"></label>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="entry-dialog" class="entry-dialog" aria-labelledby="entry-dialog-title">
+    <form id="entry-form" method="dialog" novalidate>
+      <div class="dialog-header">
+        <div><p class="eyebrow">Work record</p><h2 id="entry-dialog-title">Add entry</h2></div>
+        <button class="icon-button" id="close-entry" type="button" aria-label="Close entry form">×</button>
+      </div>
+      <div id="form-error" class="notice notice-error" role="alert" hidden></div>
+      <input id="entry-id" type="hidden">
+      <div class="form-grid">
+        <label>Date<input id="entry-date" type="date" required></label>
+        <fieldset class="mode-fieldset">
+          <legend>Entry type</legend>
+          <label class="radio-label"><input type="radio" name="entry-mode" value="interval" checked> Start and end time</label>
+          <label class="radio-label"><input type="radio" name="entry-mode" value="duration"> Duration only</label>
+        </fieldset>
+        <label id="start-field">Start time<input id="entry-start" type="time"></label>
+        <label id="end-field">End time<input id="entry-end" type="time"></label>
+        <label id="duration-field" hidden>Duration (minutes)<input id="entry-duration" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label class="full-field">Note / project <span class="muted">(optional)</span><input id="entry-note" type="text" maxlength="120" autocomplete="off"></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-secondary" id="cancel-entry" type="button">Cancel</button>
+        <button class="button button-primary" type="submit">Save entry</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="live-announcer" class="sr-only" aria-live="polite"></div>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

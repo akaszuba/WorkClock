@@ -1,0 +1,10 @@
+{
+  "name": "workclock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A static, browser-only work time tracker.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
