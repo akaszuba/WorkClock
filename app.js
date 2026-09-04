@@ -150,6 +150,11 @@ function dailyTargetMinutes(settings, dateKey) {
   return date ? Number(settings?.weekdayTargetMinutes?.[date.getDay()] || 0) : 0;
 }
 
+function weeklyTargetMinutes(settings) {
+  return Array.from({ length: 7 }, (_, day) => Number(settings?.weekdayTargetMinutes?.[day] || 0))
+    .reduce((total, target) => total + target, 0);
+}
+
 function findTargetReachedAt(entries, activeTimer, weeklyTargetMinutes, start, end, now = new Date()) {
   const relevant = entries.filter((entry) => {
     const date = dateFromKey(entry.date);
@@ -175,9 +180,10 @@ function findTargetReachedAt(entries, activeTimer, weeklyTargetMinutes, start, e
 
 function projectWeeklyTarget({ entries, activeTimer, settings, weekStart, weekEnd, now = new Date() }) {
   const worked = weeklyWorkedMinutes(entries, activeTimer, weekStart, weekEnd, now);
-  const remaining = Math.max(0, Number(settings.weeklyTargetMinutes) - worked);
+  const target = weeklyTargetMinutes(settings);
+  const remaining = Math.max(0, target - worked);
   if (remaining === 0) {
-    const reachedAt = findTargetReachedAt(entries, activeTimer, settings.weeklyTargetMinutes, weekStart, weekEnd, now);
+    const reachedAt = findTargetReachedAt(entries, activeTimer, target, weekStart, weekEnd, now);
     return { kind: 'reached', remaining: 0, reachedAt };
   }
   const todayKey = dateKeyFromDate(now);
@@ -202,7 +208,6 @@ const STORAGE_KEY = 'workclock.data.v1';
 const CURRENT_VERSION = 1;
 
 const DEFAULT_SETTINGS = Object.freeze({
-  weeklyTargetMinutes: 2400,
   weekdayTargetMinutes: Object.freeze({ 0: 0, 1: 480, 2: 480, 3: 480, 4: 480, 5: 480, 6: 0 }),
   weekStartsOn: 1,
 });
@@ -211,7 +216,6 @@ function createDefaultState() {
   return {
     version: CURRENT_VERSION,
     settings: {
-      weeklyTargetMinutes: DEFAULT_SETTINGS.weeklyTargetMinutes,
       weekdayTargetMinutes: { ...DEFAULT_SETTINGS.weekdayTargetMinutes },
       weekStartsOn: DEFAULT_SETTINGS.weekStartsOn,
     },
@@ -243,9 +247,7 @@ function validateDocument(value) {
   if (!value || typeof value !== 'object') return { valid: false, error: 'The document is not an object.' };
   if (value.version !== CURRENT_VERSION) return { valid: false, error: `Unsupported data version. Expected version ${CURRENT_VERSION}.` };
   if (!value.settings || typeof value.settings !== 'object') return { valid: false, error: 'Settings are missing.' };
-  const weekly = value.settings.weeklyTargetMinutes;
   const weekday = value.settings.weekdayTargetMinutes;
-  if (!Number.isInteger(weekly) || weekly < 0 || weekly > 10080) return { valid: false, error: 'Weekly target must be between 0 and 10,080 minutes.' };
   if (!weekday || typeof weekday !== 'object') return { valid: false, error: 'Daily targets are missing.' };
   for (let day = 0; day < 7; day += 1) {
     if (!Number.isInteger(weekday[day]) || weekday[day] < 0 || weekday[day] > 1440) return { valid: false, error: 'Daily targets must be whole minutes between 0 and 1,440.' };
@@ -409,10 +411,11 @@ const elements = {
   weeklyTotal: $('#weekly-total'), weeklyStatus: $('#weekly-status'), weeklyProgress: $('#weekly-progress'),
   weeklyTargetLabel: $('#weekly-target-label'), weeklyBalance: $('#weekly-balance'), proposedEnd: $('#proposed-end'),
   projection: $('#week-projection'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
+  weekCount: $('#week-count'),
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
   entryStart: $('#entry-start'), entryEnd: $('#entry-end'), entryDuration: $('#entry-duration'), entryNote: $('#entry-note'),
   entryDialogTitle: $('#entry-dialog-title'), formError: $('#form-error'), startField: $('#start-field'), endField: $('#end-field'),
-  durationField: $('#duration-field'), settingsForm: $('#settings-form'), weeklyTargetInput: $('#weekly-target-input'),
+  durationField: $('#duration-field'), settingsForm: $('#settings-form'),
   weekdayTargets: $('#weekday-targets'), importData: $('#import-data'),
 };
 
@@ -450,9 +453,9 @@ function render() {
   const state = store.getState();
   const now = new Date();
   const { start, end } = getWeekRangeFromKey(selectedWeekStartKey);
-  const weekKeys = getDateKeysInRange(start, end);
+  const weekKeys = getDateKeysInRange(start, end).filter((key) => dailyTargetMinutes(state.settings, key) > 0);
   const total = weeklyWorkedMinutes(state.entries, state.activeTimer, start, end, now);
-  const target = state.settings.weeklyTargetMinutes;
+  const target = weeklyTargetMinutes(state.settings);
   const balance = total - target;
   const progress = target > 0 ? Math.min(100, Math.round((total / target) * 100)) : 100;
 
@@ -467,6 +470,7 @@ function render() {
   elements.weeklyProgress.querySelector('span').style.width = `${progress}%`;
   elements.proposedEnd.textContent = proposedEndText(state, now);
   elements.projection.textContent = projectionText(state, start, end, now);
+  elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
   renderSettings(state);
   showStorageError(loaded.error || (adapter.available ? '' : 'Browser storage is unavailable. Data will not persist after refresh.'));
@@ -502,7 +506,7 @@ function renderDay(state, dateKey, now) {
   const runningMarkup = hasActiveTimer ? `<div class="entry-row running"><div class="entry-main"><span>Timer running</span><span data-live-timer="${escapeHtml(state.activeTimer.startedAt)}">${formatElapsed(state.activeTimer.startedAt, now)}</span></div><div class="entry-note">Started ${formatTime(state.activeTimer.startedAt)}</div><div class="entry-actions"><button class="text-button delete" type="button" data-action="stop-timer">Stop timer</button></div></div>` : '';
   const actionMarkup = isToday
     ? state.activeTimer ? `<button class="button timer-button day-actions" type="button" data-action="stop-timer">Stop timer</button>` : `<button class="button timer-button day-actions" type="button" data-action="start-timer">Start timer</button>`
-    : `<button class="button button-secondary day-actions" type="button" data-action="add-entry" data-date="${dateKey}">Add entry</button>`;
+    : '';
   return `<article class="day-card ${isToday ? 'is-today' : ''}">
     <div class="day-card-header"><div><div class="day-name">${escapeHtml(formatDayName(dateKey))}</div><div class="day-date">${escapeHtml(formatDate(dateKey))}</div></div>${isToday ? '<span class="today-tag">Today</span>' : ''}</div>
     <p class="day-total">${formatDuration(worked)}</p><div class="day-target">Target: ${target ? formatDuration(target) : 'No target'}</div>
@@ -527,7 +531,6 @@ function formatElapsed(startedAt, now = new Date()) {
 }
 
 function renderSettings(state) {
-  elements.weeklyTargetInput.value = String(state.settings.weeklyTargetMinutes / 60);
   elements.weekdayTargets.innerHTML = [1, 2, 3, 4, 5, 6, 0].map((day) => {
     const date = new Date(2024, 0, day === 0 ? 7 : day + 1);
     const label = date.toLocaleDateString(undefined, { weekday: 'short' });
@@ -647,16 +650,13 @@ function exportData() {
 function saveSettings(event) {
   event.preventDefault();
   try {
-    const weeklyHours = Number(elements.weeklyTargetInput.value);
-    const weeklyTargetMinutes = Math.round(weeklyHours * 60);
     const weekdayTargetMinutes = {};
     for (const day of [0, 1, 2, 3, 4, 5, 6]) {
       const hours = Number(elements.settingsForm.querySelector(`[name="weekday-target-${day}"]`).value);
       if (!Number.isFinite(hours) || hours < 0 || hours > 24) throw new Error('Daily targets must be between 0 and 24 hours.');
       weekdayTargetMinutes[day] = Math.round(hours * 60);
     }
-    if (!Number.isFinite(weeklyHours) || weeklyHours < 0 || weeklyHours > 168) throw new Error('Weekly target must be between 0 and 168 hours.');
-    store.updateSettings({ weeklyTargetMinutes, weekdayTargetMinutes });
+    store.updateSettings({ weekdayTargetMinutes });
     announce('Targets saved.'); render();
   } catch (error) { showStorageError(error.message); }
 }
