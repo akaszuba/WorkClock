@@ -169,53 +169,6 @@ function weeklyTargetMinutes(settings, entries = [], start = null, end = null) {
     .reduce((total, target) => total + target, 0) - vacationMinutes);
 }
 
-function findTargetReachedAt(entries, activeTimer, weeklyTargetMinutes, start, end, now = new Date()) {
-  const relevant = entries.filter((entry) => {
-    const date = dateFromKey(entry.date);
-    return date && date >= start && date <= end && entry.source !== 'vacation';
-  }).sort((a, b) => new Date(a.start || `${a.date}T23:59:59`).getTime() - new Date(b.start || `${b.date}T23:59:59`).getTime());
-  let accumulated = 0;
-  for (const entry of relevant) {
-    const duration = entryDurationMinutes(entry);
-    if (accumulated + duration >= weeklyTargetMinutes) {
-      if (entry.start) return new Date(new Date(entry.start).getTime() + (weeklyTargetMinutes - accumulated) * MINUTE);
-      return null;
-    }
-    accumulated += duration;
-  }
-  if (activeTimer?.startedAt) {
-    const timerStart = new Date(activeTimer.startedAt);
-    const current = now instanceof Date ? now : new Date(now);
-    const activeMinutes = Math.max(0, Math.floor((current - timerStart) / MINUTE));
-    if (accumulated + activeMinutes >= weeklyTargetMinutes) return new Date(timerStart.getTime() + (weeklyTargetMinutes - accumulated) * MINUTE);
-  }
-  return null;
-}
-
-function projectWeeklyTarget({ entries, activeTimer, settings, weekStart, weekEnd, now = new Date() }) {
-  const worked = weeklyWorkedMinutes(entries, activeTimer, weekStart, weekEnd, now);
-  const target = Math.max(0, weeklyTargetMinutes(settings, entries, weekStart, weekEnd));
-  const remaining = Math.max(0, target - worked);
-  if (remaining === 0) {
-    const reachedAt = target > 0 ? findTargetReachedAt(entries, activeTimer, target, weekStart, weekEnd, now) : null;
-    return { kind: 'reached', remaining: 0, reachedAt };
-  }
-  const todayKey = dateKeyFromDate(now);
-  const currentWeek = getWeekRange(now);
-  const isCurrentWeek = currentWeek.start.getTime() === weekStart.getTime();
-  if (!isCurrentWeek) return { kind: 'estimate', remaining, plannedDays: 0 };
-  let plannedDays = 0;
-  const cursor = new Date(now);
-  cursor.setHours(0, 0, 0, 0);
-  for (; cursor <= weekEnd; cursor.setDate(cursor.getDate() + 1)) {
-    const key = dateKeyFromDate(cursor);
-    const target = dailyTargetMinutes(settings, key, entries);
-    const workedToday = dailyWorkedMinutes(entries, activeTimer, key, now);
-    if (target > workedToday) plannedDays += 1;
-  }
-  return { kind: 'estimate', remaining, plannedDays, todayKey };
-}
-
 const TIME_CONSTANTS = { MINUTE };
 
 const STORAGE_KEY = 'workclock.data.v1';
@@ -438,7 +391,7 @@ const elements = {
   headerTotal: $('#header-total'), weekHeading: $('#week-heading'), days: $('#days'),
   weeklyTotal: $('#weekly-total'), weeklyStatus: $('#weekly-status'), weeklyProgress: $('#weekly-progress'),
   weeklyTargetLabel: $('#weekly-target-label'), weeklyBalance: $('#weekly-balance'), proposedEnd: $('#proposed-end'),
-  projection: $('#week-projection'), todayTimer: $('#today-timer'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
+  todayTimer: $('#today-timer'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
   weekCount: $('#week-count'),
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
   entryStart: $('#entry-start'), entryEnd: $('#entry-end'), entryDuration: $('#entry-duration'), entryNote: $('#entry-note'),
@@ -498,7 +451,6 @@ function render() {
   elements.weeklyProgress.querySelector('span').style.width = `${progress}%`;
   elements.proposedEnd.textContent = proposedEndText(state, now);
   renderTodayTimer(state, now);
-  elements.projection.textContent = projectionText(state, start, end, now);
   elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
   renderSettings(state);
@@ -514,13 +466,6 @@ function proposedEndText(state, now) {
   const remaining = Math.max(0, target - worked);
   if (remaining === 0) return `Target reached - ${formatDuration(worked - target)} over`;
   return `${formatTime(new Date(now.getTime() + remaining * 60 * 1000))} today`;
-}
-
-function projectionText(state, start, end, now) {
-  const projection = projectWeeklyTarget({ entries: state.entries, activeTimer: state.activeTimer, settings: state.settings, weekStart: start, weekEnd: end, now });
-  if (projection.kind === 'reached') return projection.reachedAt ? `Reached ${formatTime(projection.reachedAt)}` : 'Weekly target reached';
-  if (!projection.plannedDays) return `${formatDuration(projection.remaining)} remaining`;
-  return `${formatDuration(projection.remaining)} - ${projection.plannedDays} planned day${projection.plannedDays === 1 ? '' : 's'}`;
 }
 
 function renderTodayTimer(state, now) {

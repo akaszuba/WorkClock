@@ -55,7 +55,7 @@ h3 { margin-bottom: .35rem; font-size: 1rem; }
 .notice { padding: 11px 14px; border-radius: 9px; font-size: .9rem; margin-bottom: 16px; }
 .notice-error { background: var(--negative-soft); color: var(--negative); border: 1px solid color-mix(in srgb, var(--negative) 25%, transparent); }
 .notice-info { background: var(--accent-soft); color: var(--accent-strong); }
-.summary-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
+.summary-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
 .summary-card, .day-card, .settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
 .summary-card { padding: 20px; min-height: 158px; }
 .summary-card-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
@@ -122,6 +122,6 @@ input { display: block; width: 100%; border: 1px solid var(--border); background
 .dialog-actions { justify-content: end; margin-top: 24px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-@media (max-width: 980px) { .days-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .summary-grid { grid-template-columns: 1fr 1fr; } .summary-card-wide { grid-column: 1 / -1; } }
+@media (max-width: 980px) { .days-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .summary-grid { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 620px) { .shell { width: min(100% - 24px, 560px); } .header-inner, .week-toolbar, .section-heading { align-items: start; flex-direction: column; } .header-inner { padding: 18px 0; } .header-total { text-align: left; } .week-toolbar { padding-top: 24px; } .week-actions { width: 100%; } .week-actions .button { flex: 1; } .hide-small { display: none; } .summary-grid, .tools-grid { grid-template-columns: 1fr; } .days-grid { grid-template-columns: 1fr; } .summary-meta, .backup-card { align-items: start; flex-direction: column; } .weekday-targets { grid-template-columns: repeat(2, 1fr); } }
 @media print { .app-header { border: 0; } .week-actions, .tools-section, .day-actions, .entry-actions { display: none; } body { background: white; color: black; } .shell { width: 100%; } .summary-card, .day-card { box-shadow: none; break-inside: avoid; } .days-grid { grid-template-columns: repeat(4, 1fr); } }
