@@ -86,9 +86,9 @@
         <details class="settings-card">
           <summary>Targets</summary>
           <form id="settings-form" class="settings-form">
-            <p class="summary-help">Set each daily target. The weekly total is calculated automatically.</p>
+            <p class="summary-help">Set targets for the selected week. New weeks inherit the previous week's setup when their first record is added.</p>
             <div class="weekday-targets" id="weekday-targets"></div>
-            <button class="button button-primary" type="submit">Save targets</button>
+            <button class="button button-primary" type="submit">Save targets for this week</button>
           </form>
         </details>
         <div class="settings-card backup-card">
@@ -99,6 +99,7 @@
           <div class="backup-actions">
             <button class="button button-secondary" id="export-data" type="button">Export JSON</button>
             <label class="button button-secondary file-button">Import JSON<input id="import-data" type="file" accept="application/json,.json"></label>
+            <button class="button button-danger" id="clear-data" type="button">Clear local data</button>
           </div>
         </div>
       </div>

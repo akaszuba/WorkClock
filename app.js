@@ -57,6 +57,11 @@ function getDateKeysInRange(start, end) {
   return keys;
 }
 
+function weekStartKeyFromDateKey(dateKey) {
+  const date = dateFromKey(dateKey);
+  return date ? dateKeyFromDate(getWeekRange(date).start) : null;
+}
+
 function formatWeekLabel(start, end, locale = undefined) {
   const options = { month: 'short', day: 'numeric' };
   const startText = start.toLocaleDateString(locale, options);
@@ -147,7 +152,25 @@ function weeklyWorkedMinutes(entries, activeTimer, start, end, now = new Date())
 
 function configuredDailyTargetMinutes(settings, dateKey) {
   const date = dateFromKey(dateKey);
-  return date ? Number(settings?.weekdayTargetMinutes?.[date.getDay()] || 0) : 0;
+  if (!date) return 0;
+  const weekStartKey = dateKeyFromDate(getWeekRange(date).start);
+  const weekdayTargets = weekdayTargetsForWeek(settings, weekStartKey);
+  return Number(weekdayTargets?.[date.getDay()] || 0);
+}
+
+function weekdayTargetsForWeek(settings, weekStartKey) {
+  const weeklyTargets = settings?.weeklyTargets;
+  if (weeklyTargets && weeklyTargets[weekStartKey]) return weeklyTargets[weekStartKey];
+  if (weeklyTargets && dateFromKey(weekStartKey)) {
+    // An unset week inherits the most recently configured week. This is used
+    // for display and calculations; the value is snapshotted when a record is
+    // first added to that week.
+    const previousKeys = Object.keys(weeklyTargets)
+      .filter((key) => key < weekStartKey)
+      .sort();
+    if (previousKeys.length) return weeklyTargets[previousKeys[previousKeys.length - 1]];
+  }
+  return settings?.weekdayTargetMinutes || DEFAULT_SETTINGS.weekdayTargetMinutes;
 }
 
 function vacationMinutesForDate(entries, dateKey) {
@@ -165,8 +188,11 @@ function weeklyTargetMinutes(settings, entries = [], start = null, end = null) {
     return entry.source === 'vacation' && date && (!start || date >= start) && (!end || date <= end)
       ? sum + entryDurationMinutes(entry) : sum;
   }, 0);
-  return Math.max(0, Array.from({ length: 7 }, (_, day) => Number(settings?.weekdayTargetMinutes?.[day] || 0))
-    .reduce((total, target) => total + target, 0) - vacationMinutes);
+  const target = start && end
+    ? getDateKeysInRange(start, end).reduce((total, dateKey) => total + configuredDailyTargetMinutes(settings, dateKey), 0)
+    : Array.from({ length: 7 }, (_, day) => Number(settings?.weekdayTargetMinutes?.[day] || 0))
+      .reduce((total, dailyTarget) => total + dailyTarget, 0);
+  return Math.max(0, target - vacationMinutes);
 }
 
 function targetMinutesThroughDate(settings, entries, start, end) {
@@ -189,6 +215,7 @@ function createDefaultState() {
     version: CURRENT_VERSION,
     settings: {
       weekdayTargetMinutes: { ...DEFAULT_SETTINGS.weekdayTargetMinutes },
+      weeklyTargets: {},
       weekStartsOn: DEFAULT_SETTINGS.weekStartsOn,
     },
     entries: [],
@@ -202,6 +229,14 @@ function clone(value) {
 
 function isIsoString(value) {
   return typeof value === 'string' && Number.isFinite(new Date(value).getTime());
+}
+
+function isWeekdayTargetMap(value) {
+  if (!value || typeof value !== 'object') return false;
+  for (let day = 0; day < 7; day += 1) {
+    if (!Number.isInteger(value[day]) || value[day] < 0 || value[day] > 1440) return false;
+  }
+  return true;
 }
 
 function isEntry(value) {
@@ -221,9 +256,17 @@ function validateDocument(value) {
   if (value.version !== CURRENT_VERSION) return { valid: false, error: `Unsupported data version. Expected version ${CURRENT_VERSION}.` };
   if (!value.settings || typeof value.settings !== 'object') return { valid: false, error: 'Settings are missing.' };
   const weekday = value.settings.weekdayTargetMinutes;
-  if (!weekday || typeof weekday !== 'object') return { valid: false, error: 'Daily targets are missing.' };
-  for (let day = 0; day < 7; day += 1) {
-    if (!Number.isInteger(weekday[day]) || weekday[day] < 0 || weekday[day] > 1440) return { valid: false, error: 'Daily targets must be whole minutes between 0 and 1,440.' };
+  if (!isWeekdayTargetMap(weekday)) return { valid: false, error: 'Daily targets must be whole minutes between 0 and 1,440.' };
+  if (value.settings.weeklyTargets !== undefined) {
+    if (!value.settings.weeklyTargets || typeof value.settings.weeklyTargets !== 'object' || Array.isArray(value.settings.weeklyTargets)) {
+      return { valid: false, error: 'Weekly targets are invalid.' };
+    }
+    for (const [weekStartKey, targets] of Object.entries(value.settings.weeklyTargets)) {
+      const weekStart = dateFromKey(weekStartKey);
+      if (!weekStart || weekStartKeyFromDateKey(weekStartKey) !== weekStartKey || !isWeekdayTargetMap(targets)) {
+        return { valid: false, error: 'Weekly targets are invalid.' };
+      }
+    }
   }
   if (value.settings.weekStartsOn !== 1) return { valid: false, error: 'Only Monday week starts are supported.' };
   if (!Array.isArray(value.entries) || value.entries.some((entry) => !isEntry(entry))) return { valid: false, error: 'One or more entries are invalid.' };
@@ -238,6 +281,14 @@ function validateDocument(value) {
     }
   }
   return { valid: true };
+}
+
+function normalizeDocument(value) {
+  const normalized = clone(value);
+  if (normalized && normalized.settings && typeof normalized.settings === 'object') {
+    normalized.settings.weeklyTargets = normalized.settings.weeklyTargets || {};
+  }
+  return normalized;
 }
 
 function createLocalStorageAdapter(storage = undefined) {
@@ -257,6 +308,10 @@ function createLocalStorageAdapter(storage = undefined) {
       if (!available) throw new Error('Browser storage is unavailable.');
       try { backend.setItem(STORAGE_KEY, value); } catch (error) { available = false; throw new Error('Browser storage is unavailable or full.', { cause: error }); }
     },
+    clear() {
+      if (!available) throw new Error('Browser storage is unavailable.');
+      try { backend.removeItem(STORAGE_KEY); } catch (error) { available = false; throw new Error('Browser storage could not be cleared.', { cause: error }); }
+    },
   };
 }
 
@@ -267,7 +322,7 @@ function loadState(adapter = createLocalStorageAdapter()) {
   try {
     const parsed = JSON.parse(raw);
     const result = validateDocument(parsed);
-    return result.valid ? { state: parsed, error: null } : { state: fallback, error: `Saved data could not be loaded: ${result.error}` };
+    return result.valid ? { state: normalizeDocument(parsed), error: null } : { state: fallback, error: `Saved data could not be loaded: ${result.error}` };
   } catch {
     return { state: fallback, error: 'Saved data could not be loaded because it is malformed.' };
   }
@@ -289,13 +344,26 @@ function assertNoOverlap(entries, candidate, ignoreId = null) {
   if (overlap) throw new Error('This interval overlaps another entry on the same day.');
 }
 
+function hasRecordInWeek(entries, weekStartKey, ignoreId = null) {
+  return entries.some((entry) => entry.id !== ignoreId && weekStartKeyFromDateKey(entry.date) === weekStartKey);
+}
+
+function ensureWeekTargetSettings(state, dateKeys, ignoreId = null) {
+  const weeklyTargets = state.settings.weeklyTargets || (state.settings.weeklyTargets = {});
+  for (const dateKey of dateKeys) {
+    const weekStartKey = weekStartKeyFromDateKey(dateKey);
+    if (!weekStartKey || weeklyTargets[weekStartKey] || hasRecordInWeek(state.entries, weekStartKey, ignoreId)) continue;
+    weeklyTargets[weekStartKey] = clone(weekdayTargetsForWeek(state.settings, weekStartKey));
+  }
+}
+
 function createId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `entry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function createStateStore(adapter = createLocalStorageAdapter(), initialState = undefined) {
-  let state = clone(initialState || loadState(adapter).state);
+  let state = normalizeDocument(clone(initialState || loadState(adapter).state));
   const listeners = new Set();
   const notify = () => listeners.forEach((listener) => listener(state));
   const persist = () => { adapter.write(JSON.stringify(state)); };
@@ -312,7 +380,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
       const entry = { id: input.id || createId(), date: input.date, start: input.start ?? null, end: input.end ?? null, durationMinutes: input.durationMinutes, note: input.note || '', source: input.source || 'manual' };
       if (!isEntry(entry)) throw new Error('Entry details are invalid.');
       assertNoOverlap(state.entries, entry);
-      return mutate(() => state.entries.push(entry));
+      return mutate(() => { ensureWeekTargetSettings(state, [entry.date]); state.entries.push(entry); });
     },
     addVacation(date, note = '') {
       const durationMinutes = configuredDailyTargetMinutes(state.settings, date);
@@ -320,7 +388,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
       const entry = { id: createId(), date, start: null, end: null, durationMinutes, note: note || '', source: 'vacation' };
       if (!isEntry(entry)) throw new Error('Vacation details are invalid.');
       assertNoOverlap(state.entries, entry);
-      return mutate(() => state.entries.push(entry));
+      return mutate(() => { ensureWeekTargetSettings(state, [entry.date]); state.entries.push(entry); });
     },
     updateEntry(id, input) {
       const index = state.entries.findIndex((entry) => entry.id === id);
@@ -328,7 +396,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
       const entry = { ...state.entries[index], ...input, id };
       if (!isEntry(entry)) throw new Error('Entry details are invalid.');
       assertNoOverlap(state.entries, entry, id);
-      return mutate(() => { state.entries[index] = entry; });
+      return mutate(() => { ensureWeekTargetSettings(state, [entry.date], id); state.entries[index] = entry; });
     },
     deleteEntry(id) {
       if (!state.entries.some((entry) => entry.id === id)) throw new Error('Entry no longer exists.');
@@ -368,7 +436,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
         if (finalDuration > 0) newEntries.push({ id: segmentId, date: secondDate, start: segmentStart.toISOString(), end: end.toISOString(), durationMinutes: finalDuration, note: '', source: 'timer' });
       }
       for (const entry of newEntries) assertNoOverlap(state.entries, entry);
-      return mutate(() => { state.entries.push(...newEntries); state.activeTimer = null; });
+      return mutate(() => { ensureWeekTargetSettings(state, newEntries.map((entry) => entry.date)); state.entries.push(...newEntries); state.activeTimer = null; });
     },
     updateSettings(settings) {
       const next = { ...state.settings, ...settings, weekdayTargetMinutes: { ...state.settings.weekdayTargetMinutes, ...(settings.weekdayTargetMinutes || {}) } };
@@ -376,10 +444,28 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
       if (!result.valid) throw new Error(result.error);
       return mutate(() => { state.settings = next; });
     },
-    replace(nextState) {
-      const result = validateDocument(nextState);
+    updateWeekSettings(weekStartKey, settings) {
+      if (weekStartKeyFromDateKey(weekStartKey) !== weekStartKey) throw new Error('The selected week is invalid.');
+      const weekdayTargetMinutes = { ...weekdayTargetsForWeek(state.settings, weekStartKey), ...(settings.weekdayTargetMinutes || {}) };
+      const next = {
+        ...state.settings,
+        weeklyTargets: { ...(state.settings.weeklyTargets || {}), [weekStartKey]: weekdayTargetMinutes },
+      };
+      const result = validateDocument({ ...state, settings: next });
       if (!result.valid) throw new Error(result.error);
-      return mutate(() => { state = clone(nextState); });
+      return mutate(() => { state.settings = next; });
+    },
+    clearData() {
+      adapter.clear();
+      state = createDefaultState();
+      notify();
+      return state;
+    },
+    replace(nextState) {
+      const normalized = normalizeDocument(nextState);
+      const result = validateDocument(normalized);
+      if (!result.valid) throw new Error(result.error);
+      return mutate(() => { state = normalized; });
     },
     exportJson() { return JSON.stringify(state, null, 2); },
   };
@@ -387,6 +473,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
 
 const adapter = createLocalStorageAdapter();
 const loaded = loadState(adapter);
+let loadedError = loaded.error;
 const store = createStateStore(adapter, loaded.state);
 let selectedWeekStartKey = dateKeyFromDate(getWeekRange().start);
 let timerInterval = null;
@@ -404,7 +491,7 @@ const elements = {
   entryStart: $('#entry-start'), entryEnd: $('#entry-end'), entryDuration: $('#entry-duration'), entryNote: $('#entry-note'),
   entryDialogTitle: $('#entry-dialog-title'), formError: $('#form-error'), startField: $('#start-field'), endField: $('#end-field'),
   durationField: $('#duration-field'), vacationHelp: $('#vacation-help'), settingsForm: $('#settings-form'),
-  weekdayTargets: $('#weekday-targets'), importData: $('#import-data'),
+  weekdayTargets: $('#weekday-targets'), importData: $('#import-data'), clearData: $('#clear-data'),
 };
 
 function escapeHtml(value) {
@@ -466,8 +553,8 @@ function render() {
   renderTodayTimer(state, now);
   elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
-  renderSettings(state);
-  showStorageError(loaded.error || (adapter.available ? '' : 'Browser storage is unavailable. Data will not persist after refresh.'));
+  renderSettings(state, dateKeyFromDate(start));
+  showStorageError(loadedError || (adapter.available ? '' : 'Browser storage is unavailable. Data will not persist after refresh.'));
 }
 
 function currentWeekBalanceDetails(state, now) {
@@ -570,13 +657,14 @@ function formatElapsed(startedAt, now = new Date()) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function renderSettings(state) {
+function renderSettings(state, weekStartKey) {
+  const weekdayTargetMinutes = weekdayTargetsForWeek(state.settings, weekStartKey);
   elements.weekdayTargets.innerHTML = [1, 2, 3, 4, 5, 6, 0].map((day) => {
     // 2024-01-01 is a Monday. Use the day index directly so Saturday and
     // Sunday do not resolve to the same reference date.
     const date = new Date(2024, 0, day === 0 ? 7 : day);
     const label = date.toLocaleDateString(undefined, { weekday: 'short' });
-    return `<label>${label}<input name="weekday-target-${day}" type="number" min="0" max="24" step="any" inputmode="decimal" value="${state.settings.weekdayTargetMinutes[day] / 60}" required></label>`;
+    return `<label>${label}<input name="weekday-target-${day}" type="number" min="0" max="24" step="any" inputmode="decimal" value="${weekdayTargetMinutes[day] / 60}" required></label>`;
   }).join('');
 }
 
@@ -687,7 +775,8 @@ async function importData(event) {
     const result = validateDocument(parsed);
     if (!result.valid) throw new Error(result.error);
     if (!window.confirm('Replace all current WorkClock data with this backup?')) return;
-    store.replace(parsed);
+    store.replace(normalizeDocument(parsed));
+    loadedError = null;
     announce('Backup imported.'); render();
   } catch (error) { showStorageError(`Import failed: ${error.message}`); }
 }
@@ -712,8 +801,19 @@ function saveSettings(event) {
       if (!Number.isFinite(hours) || hours < 0 || hours > 24) throw new Error('Daily targets must be between 0 and 24 hours.');
       weekdayTargetMinutes[day] = Math.round(hours * 60);
     }
-    store.updateSettings({ weekdayTargetMinutes });
+    store.updateWeekSettings(selectedWeekStartKey, { weekdayTargetMinutes });
     announce('Targets saved.'); render();
+  } catch (error) { showStorageError(error.message); }
+}
+
+function clearData() {
+  if (!window.confirm('Clear all WorkClock entries, timers, and weekly targets from this browser? This cannot be undone unless you have an export.')) return;
+  try {
+    store.clearData();
+    loadedError = null;
+    selectedWeekStartKey = dateKeyFromDate(getWeekRange().start);
+    announce('Local WorkClock data cleared.');
+    render();
   } catch (error) { showStorageError(error.message); }
 }
 
@@ -729,6 +829,7 @@ $('#cancel-entry').addEventListener('click', () => elements.entryDialog.close())
 elements.settingsForm.addEventListener('submit', saveSettings);
 $('#export-data').addEventListener('click', exportData);
 elements.importData.addEventListener('change', importData);
+elements.clearData.addEventListener('click', clearData);
 elements.entryDialog.addEventListener('click', (event) => { if (event.target === elements.entryDialog) elements.entryDialog.close(); });
 
 store.subscribe(() => { if (!adapter.available) showStorageError('Browser storage is unavailable or full. Changes are only in memory.'); });
