@@ -438,7 +438,7 @@ const elements = {
   headerTotal: $('#header-total'), weekHeading: $('#week-heading'), days: $('#days'),
   weeklyTotal: $('#weekly-total'), weeklyStatus: $('#weekly-status'), weeklyProgress: $('#weekly-progress'),
   weeklyTargetLabel: $('#weekly-target-label'), weeklyBalance: $('#weekly-balance'), proposedEnd: $('#proposed-end'),
-  projection: $('#week-projection'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
+  projection: $('#week-projection'), todayTimer: $('#today-timer'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
   weekCount: $('#week-count'),
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
   entryStart: $('#entry-start'), entryEnd: $('#entry-end'), entryDuration: $('#entry-duration'), entryNote: $('#entry-note'),
@@ -497,6 +497,7 @@ function render() {
   elements.weeklyProgress.setAttribute('aria-valuenow', String(progress));
   elements.weeklyProgress.querySelector('span').style.width = `${progress}%`;
   elements.proposedEnd.textContent = proposedEndText(state, now);
+  renderTodayTimer(state, now);
   elements.projection.textContent = projectionText(state, start, end, now);
   elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
@@ -522,6 +523,14 @@ function projectionText(state, start, end, now) {
   return `${formatDuration(projection.remaining)} - ${projection.plannedDays} planned day${projection.plannedDays === 1 ? '' : 's'}`;
 }
 
+function renderTodayTimer(state, now) {
+  if (!state.activeTimer) {
+    elements.todayTimer.innerHTML = '<button class="button timer-button" type="button" data-action="start-timer">Start timer</button>';
+    return;
+  }
+  elements.todayTimer.innerHTML = `<div class="today-timer-status"><span>Timer running</span><strong data-live-timer="${escapeHtml(state.activeTimer.startedAt)}">${formatElapsed(state.activeTimer.startedAt, now)}</strong></div><button class="button timer-button" type="button" data-action="stop-timer">Stop timer</button>`;
+}
+
 function renderDay(state, dateKey, now) {
   const todayKey = dateKeyFromDate(now);
   const isToday = dateKey === todayKey;
@@ -533,16 +542,12 @@ function renderDay(state, dateKey, now) {
   const activeMinutes = activeTimerMinutesForDate(state.activeTimer, dateKey, now);
   const hasActiveTimer = Boolean(state.activeTimer && activeMinutes >= 0 && dateKey === dateKeyFromDate(new Date(state.activeTimer.startedAt)));
   const entryMarkup = entries.map((entry) => renderEntry(entry)).join('');
-  const runningMarkup = hasActiveTimer ? `<div class="entry-row running"><div class="entry-main"><span>Timer running</span><span data-live-timer="${escapeHtml(state.activeTimer.startedAt)}">${formatElapsed(state.activeTimer.startedAt, now)}</span></div><div class="entry-note">Started ${formatTime(state.activeTimer.startedAt)}</div><div class="entry-actions"><button class="text-button delete" type="button" data-action="stop-timer">Stop timer</button></div></div>` : '';
-  const actionMarkup = isToday
-    ? state.activeTimer ? `<button class="button timer-button day-actions" type="button" data-action="stop-timer">Stop timer</button>` : `<button class="button timer-button day-actions" type="button" data-action="start-timer">Start timer</button>`
-    : '';
+  const runningMarkup = hasActiveTimer ? `<div class="entry-row running"><div class="entry-main"><span>Timer running</span><span data-live-timer="${escapeHtml(state.activeTimer.startedAt)}">${formatElapsed(state.activeTimer.startedAt, now)}</span></div><div class="entry-note">Started ${formatTime(state.activeTimer.startedAt)}</div></div>` : '';
   return `<article class="day-card ${isToday ? 'is-today' : ''}">
     <div class="day-card-header"><div><div class="day-name">${escapeHtml(formatDayName(dateKey))}</div><div class="day-date">${escapeHtml(formatDate(dateKey))}</div></div>${isToday ? '<span class="today-tag">Today</span>' : ''}</div>
     <p class="day-total">${formatDuration(worked)}</p><div class="day-target">${vacationMinutes ? `Target reduced by ${formatDuration(vacationMinutes)}` : `Target: ${target ? formatDuration(target) : 'No target'}`}</div>
     <div class="day-balance ${balanceClass(balance)}">${target ? escapeHtml(formatSignedBalance(balance)) : vacationMinutes ? 'Vacation day' : `${formatDuration(worked)} logged`}</div>
     <div class="entry-list">${runningMarkup}${entryMarkup || (!runningMarkup ? '<div class="empty-day">No entries yet</div>' : '')}</div>
-    ${actionMarkup}
     <div class="day-actions"><button class="text-button" type="button" data-action="add-entry" data-date="${dateKey}">+ Add manual entry</button><button class="text-button vacation-action" type="button" data-action="add-vacation" data-date="${dateKey}">+ Add full-day vacation</button></div>
   </article>`;
 }
@@ -709,6 +714,7 @@ $('#previous-week').addEventListener('click', () => setWeek(-1));
 $('#next-week').addEventListener('click', () => setWeek(1));
 $('#today-week').addEventListener('click', () => { selectedWeekStartKey = dateKeyFromDate(getWeekRange().start); render(); });
 elements.days.addEventListener('click', handleDayAction);
+elements.todayTimer.addEventListener('click', handleDayAction);
 elements.entryForm.addEventListener('submit', saveEntry);
 elements.entryForm.querySelectorAll('input[name="entry-mode"]').forEach((input) => input.addEventListener('change', toggleEntryMode));
 $('#close-entry').addEventListener('click', () => elements.entryDialog.close());
