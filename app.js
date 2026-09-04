@@ -169,6 +169,11 @@ function weeklyTargetMinutes(settings, entries = [], start = null, end = null) {
     .reduce((total, target) => total + target, 0) - vacationMinutes);
 }
 
+function targetMinutesThroughDate(settings, entries, start, end) {
+  return getDateKeysInRange(start, end)
+    .reduce((total, dateKey) => total + dailyTargetMinutes(settings, dateKey, entries), 0);
+}
+
 const TIME_CONSTANTS = { MINUTE };
 
 const STORAGE_KEY = 'workclock.data.v1';
@@ -462,8 +467,25 @@ function proposedEndText(state, now) {
   const vacationMinutes = vacationMinutesForDate(state.entries, todayKey);
   const target = dailyTargetMinutes(state.settings, todayKey, state.entries);
   if (target === 0) return vacationMinutes ? 'Vacation day' : 'No scheduled target';
+
   const worked = dailyWorkedMinutes(state.entries, state.activeTimer, todayKey, now);
-  const remaining = Math.max(0, target - worked);
+  const { start, end } = getWeekRange(now);
+  const today = dateFromKey(todayKey);
+  const targetSoFar = targetMinutesThroughDate(state.settings, state.entries, start, today);
+  const workedSoFar = weeklyWorkedMinutes(state.entries, state.activeTimer, start, today, now);
+  const currentWeekBalance = workedSoFar - targetSoFar;
+  const remainingWeekWorkTime = Math.max(0, weeklyTargetMinutes(state.settings, state.entries, start, end) - targetSoFar);
+
+  // Catch up any deficit accumulated earlier in the week before stopping today.
+  // When the week is already ahead, keep today's work aligned with today's target
+  // while there is still scheduled work left later in the week.
+  const remaining = currentWeekBalance < 0
+    ? -currentWeekBalance
+    : Math.max(0, target - worked);
+
+  if (currentWeekBalance > 0 && currentWeekBalance >= remainingWeekWorkTime) {
+    return `Week target reached - ${formatDuration(currentWeekBalance - remainingWeekWorkTime)} over`;
+  }
   if (remaining === 0) return `Target reached - ${formatDuration(worked - target)} over`;
   return `${formatTime(new Date(now.getTime() + remaining * 60 * 1000))} today`;
 }
