@@ -126,7 +126,7 @@ function entriesForDate(entries, dateKey) {
 }
 
 function dailyWorkedMinutes(entries, activeTimer, dateKey, now = new Date()) {
-  const completed = entriesForDate(entries, dateKey).reduce((sum, entry) => sum + entryDurationMinutes(entry), 0);
+  const completed = entriesForDate(entries, dateKey).reduce((sum, entry) => sum + (entry.source === 'vacation' ? 0 : entryDurationMinutes(entry)), 0);
   return completed + activeTimerMinutesForDate(activeTimer, dateKey, now);
 }
 
@@ -137,7 +137,7 @@ function weeklyWorkedMinutes(entries, activeTimer, start, end, now = new Date())
   const endTime = endOfWeek.getTime();
   const completed = entries.reduce((sum, entry) => {
     const date = dateFromKey(entry.date);
-    return date && date >= start && date <= end ? sum + entryDurationMinutes(entry) : sum;
+    return date && date >= start && date <= end && entry.source !== 'vacation' ? sum + entryDurationMinutes(entry) : sum;
   }, 0);
   const timerStart = activeTimer?.startedAt ? new Date(activeTimer.startedAt).getTime() : NaN;
   const timerEnd = now instanceof Date ? now.getTime() : new Date(now).getTime();
@@ -145,20 +145,34 @@ function weeklyWorkedMinutes(entries, activeTimer, start, end, now = new Date())
   return completed + active;
 }
 
-function dailyTargetMinutes(settings, dateKey) {
+function configuredDailyTargetMinutes(settings, dateKey) {
   const date = dateFromKey(dateKey);
   return date ? Number(settings?.weekdayTargetMinutes?.[date.getDay()] || 0) : 0;
 }
 
-function weeklyTargetMinutes(settings) {
-  return Array.from({ length: 7 }, (_, day) => Number(settings?.weekdayTargetMinutes?.[day] || 0))
-    .reduce((total, target) => total + target, 0);
+function vacationMinutesForDate(entries, dateKey) {
+  return entries.filter((entry) => entry.date === dateKey && entry.source === 'vacation')
+    .reduce((sum, entry) => sum + entryDurationMinutes(entry), 0);
+}
+
+function dailyTargetMinutes(settings, dateKey, entries = []) {
+  return Math.max(0, configuredDailyTargetMinutes(settings, dateKey) - vacationMinutesForDate(entries, dateKey));
+}
+
+function weeklyTargetMinutes(settings, entries = [], start = null, end = null) {
+  const vacationMinutes = entries.reduce((sum, entry) => {
+    const date = dateFromKey(entry.date);
+    return entry.source === 'vacation' && date && (!start || date >= start) && (!end || date <= end)
+      ? sum + entryDurationMinutes(entry) : sum;
+  }, 0);
+  return Math.max(0, Array.from({ length: 7 }, (_, day) => Number(settings?.weekdayTargetMinutes?.[day] || 0))
+    .reduce((total, target) => total + target, 0) - vacationMinutes);
 }
 
 function findTargetReachedAt(entries, activeTimer, weeklyTargetMinutes, start, end, now = new Date()) {
   const relevant = entries.filter((entry) => {
     const date = dateFromKey(entry.date);
-    return date && date >= start && date <= end;
+    return date && date >= start && date <= end && entry.source !== 'vacation';
   }).sort((a, b) => new Date(a.start || `${a.date}T23:59:59`).getTime() - new Date(b.start || `${b.date}T23:59:59`).getTime());
   let accumulated = 0;
   for (const entry of relevant) {
@@ -180,10 +194,10 @@ function findTargetReachedAt(entries, activeTimer, weeklyTargetMinutes, start, e
 
 function projectWeeklyTarget({ entries, activeTimer, settings, weekStart, weekEnd, now = new Date() }) {
   const worked = weeklyWorkedMinutes(entries, activeTimer, weekStart, weekEnd, now);
-  const target = weeklyTargetMinutes(settings);
+  const target = Math.max(0, weeklyTargetMinutes(settings, entries, weekStart, weekEnd));
   const remaining = Math.max(0, target - worked);
   if (remaining === 0) {
-    const reachedAt = findTargetReachedAt(entries, activeTimer, target, weekStart, weekEnd, now);
+    const reachedAt = target > 0 ? findTargetReachedAt(entries, activeTimer, target, weekStart, weekEnd, now) : null;
     return { kind: 'reached', remaining: 0, reachedAt };
   }
   const todayKey = dateKeyFromDate(now);
@@ -195,7 +209,7 @@ function projectWeeklyTarget({ entries, activeTimer, settings, weekStart, weekEn
   cursor.setHours(0, 0, 0, 0);
   for (; cursor <= weekEnd; cursor.setDate(cursor.getDate() + 1)) {
     const key = dateKeyFromDate(cursor);
-    const target = dailyTargetMinutes(settings, key);
+    const target = dailyTargetMinutes(settings, key, entries);
     const workedToday = dailyWorkedMinutes(entries, activeTimer, key, now);
     if (target > workedToday) plannedDays += 1;
   }
@@ -343,7 +357,7 @@ function createStateStore(adapter = createLocalStorageAdapter(), initialState = 
       return mutate(() => state.entries.push(entry));
     },
     addVacation(date, note = '') {
-      const durationMinutes = dailyTargetMinutes(state.settings, date);
+      const durationMinutes = configuredDailyTargetMinutes(state.settings, date);
       if (!durationMinutes) throw new Error('Vacation can only be added on a day with a daily target.');
       const entry = { id: createId(), date, start: null, end: null, durationMinutes, note: note || '', source: 'vacation' };
       if (!isEntry(entry)) throw new Error('Vacation details are invalid.');
@@ -467,9 +481,9 @@ function render() {
   const state = store.getState();
   const now = new Date();
   const { start, end } = getWeekRangeFromKey(selectedWeekStartKey);
-  const weekKeys = getDateKeysInRange(start, end).filter((key) => dailyTargetMinutes(state.settings, key) > 0);
+  const weekKeys = getDateKeysInRange(start, end).filter((key) => configuredDailyTargetMinutes(state.settings, key) > 0);
   const total = weeklyWorkedMinutes(state.entries, state.activeTimer, start, end, now);
-  const target = weeklyTargetMinutes(state.settings);
+  const target = Math.max(0, weeklyTargetMinutes(state.settings, state.entries, start, end));
   const balance = total - target;
   const progress = target > 0 ? Math.min(100, Math.round((total / target) * 100)) : 100;
 
@@ -492,8 +506,9 @@ function render() {
 
 function proposedEndText(state, now) {
   const todayKey = dateKeyFromDate(now);
-  const target = dailyTargetMinutes(state.settings, todayKey);
-  if (target === 0) return 'No scheduled target';
+  const vacationMinutes = vacationMinutesForDate(state.entries, todayKey);
+  const target = dailyTargetMinutes(state.settings, todayKey, state.entries);
+  if (target === 0) return vacationMinutes ? 'Vacation day' : 'No scheduled target';
   const worked = dailyWorkedMinutes(state.entries, state.activeTimer, todayKey, now);
   const remaining = Math.max(0, target - worked);
   if (remaining === 0) return `Target reached - ${formatDuration(worked - target)} over`;
@@ -510,7 +525,8 @@ function projectionText(state, start, end, now) {
 function renderDay(state, dateKey, now) {
   const todayKey = dateKeyFromDate(now);
   const isToday = dateKey === todayKey;
-  const target = dailyTargetMinutes(state.settings, dateKey);
+  const target = dailyTargetMinutes(state.settings, dateKey, state.entries);
+  const vacationMinutes = vacationMinutesForDate(state.entries, dateKey);
   const worked = dailyWorkedMinutes(state.entries, state.activeTimer, dateKey, now);
   const balance = worked - target;
   const entries = entriesForDate(state.entries, dateKey);
@@ -523,8 +539,8 @@ function renderDay(state, dateKey, now) {
     : '';
   return `<article class="day-card ${isToday ? 'is-today' : ''}">
     <div class="day-card-header"><div><div class="day-name">${escapeHtml(formatDayName(dateKey))}</div><div class="day-date">${escapeHtml(formatDate(dateKey))}</div></div>${isToday ? '<span class="today-tag">Today</span>' : ''}</div>
-    <p class="day-total">${formatDuration(worked)}</p><div class="day-target">Target: ${target ? formatDuration(target) : 'No target'}</div>
-    <div class="day-balance ${balanceClass(balance)}">${target ? escapeHtml(formatSignedBalance(balance)) : `${formatDuration(worked)} logged`}</div>
+    <p class="day-total">${formatDuration(worked)}</p><div class="day-target">${vacationMinutes ? `Target reduced by ${formatDuration(vacationMinutes)}` : `Target: ${target ? formatDuration(target) : 'No target'}`}</div>
+    <div class="day-balance ${balanceClass(balance)}">${target ? escapeHtml(formatSignedBalance(balance)) : vacationMinutes ? 'Vacation day' : `${formatDuration(worked)} logged`}</div>
     <div class="entry-list">${runningMarkup}${entryMarkup || (!runningMarkup ? '<div class="empty-day">No entries yet</div>' : '')}</div>
     ${actionMarkup}
     <div class="day-actions"><button class="text-button" type="button" data-action="add-entry" data-date="${dateKey}">+ Add manual entry</button><button class="text-button vacation-action" type="button" data-action="add-vacation" data-date="${dateKey}">+ Add full-day vacation</button></div>
@@ -532,8 +548,10 @@ function renderDay(state, dateKey, now) {
 }
 
 function renderEntry(entry) {
-  const timeText = entry.source === 'vacation' ? 'Vacation - Full day' : entry.start && entry.end ? `${formatTime(entry.start)} - ${formatTime(entry.end)}` : `${formatDuration(entry.durationMinutes)} - duration only`;
-  return `<div class="entry-row ${entry.source === 'vacation' ? 'vacation-entry' : ''}"><div class="entry-main"><span>${escapeHtml(timeText)}</span><span>${formatDuration(entry.durationMinutes, { compact: true })}</span></div>${entry.note ? `<div class="entry-note" title="${escapeHtml(entry.note)}">${escapeHtml(entry.note)}</div>` : ''}<div class="entry-actions"><button class="text-button" type="button" data-action="edit-entry" data-id="${escapeHtml(entry.id)}">Edit</button><button class="text-button delete" type="button" data-action="delete-entry" data-id="${escapeHtml(entry.id)}">Delete</button></div></div>`;
+  const isVacation = entry.source === 'vacation';
+  const timeText = isVacation ? 'Vacation' : entry.start && entry.end ? `${formatTime(entry.start)} - ${formatTime(entry.end)}` : `${formatDuration(entry.durationMinutes)} - duration only`;
+  const amountText = isVacation ? `${formatDuration(entry.durationMinutes, { compact: true })} target` : formatDuration(entry.durationMinutes, { compact: true });
+  return `<div class="entry-row ${isVacation ? 'vacation-entry' : ''}"><div class="entry-main"><span>${escapeHtml(timeText)}</span><span>${escapeHtml(amountText)}</span></div>${entry.note ? `<div class="entry-note" title="${escapeHtml(entry.note)}">${escapeHtml(entry.note)}</div>` : ''}<div class="entry-actions"><button class="text-button" type="button" data-action="edit-entry" data-id="${escapeHtml(entry.id)}">Edit</button><button class="text-button delete" type="button" data-action="delete-entry" data-id="${escapeHtml(entry.id)}">Delete</button></div></div>`;
 }
 
 function formatElapsed(startedAt, now = new Date()) {
@@ -605,7 +623,7 @@ function saveEntry(event) {
   const input = { date, note: elements.entryNote.value.trim(), source: 'manual' };
   if (mode === 'vacation') {
     input.source = 'vacation'; input.start = null; input.end = null;
-    input.durationMinutes = dailyTargetMinutes(store.getState().settings, date);
+    input.durationMinutes = configuredDailyTargetMinutes(store.getState().settings, date);
     if (!input.durationMinutes) return showError('Vacation can only be added on a day with a daily target.');
   } else if (mode === 'duration') {
     const duration = Number(elements.entryDuration.value);
