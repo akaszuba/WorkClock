@@ -396,6 +396,7 @@ const elements = {
   headerTotal: $('#header-total'), weekHeading: $('#week-heading'), days: $('#days'),
   weeklyTotal: $('#weekly-total'), weeklyStatus: $('#weekly-status'), weeklyProgress: $('#weekly-progress'),
   weeklyTargetLabel: $('#weekly-target-label'), weeklyBalance: $('#weekly-balance'), proposedEnd: $('#proposed-end'),
+  proposedEndDetail: $('#proposed-end-detail'),
   todayTimer: $('#today-timer'), storageError: $('#storage-error'), liveAnnouncer: $('#live-announcer'),
   weekCount: $('#week-count'),
   entryDialog: $('#entry-dialog'), entryForm: $('#entry-form'), entryId: $('#entry-id'), entryDate: $('#entry-date'),
@@ -454,7 +455,9 @@ function render() {
   elements.weeklyStatus.textContent = balance > 0 ? `${formatDuration(balance)} over target` : balance < 0 ? `${formatDuration(-balance)} remaining` : 'Target reached';
   elements.weeklyProgress.setAttribute('aria-valuenow', String(progress));
   elements.weeklyProgress.querySelector('span').style.width = `${progress}%`;
-  elements.proposedEnd.textContent = proposedEndText(state, now);
+  const proposedEnd = proposedEndDetails(state, now);
+  elements.proposedEnd.textContent = proposedEnd.time;
+  elements.proposedEndDetail.textContent = proposedEnd.detail;
   renderTodayTimer(state, now);
   elements.weekCount.textContent = `${weekKeys.length} day${weekKeys.length === 1 ? '' : 's'}`;
   elements.days.innerHTML = weekKeys.map((key) => renderDay(state, key, now)).join('');
@@ -462,11 +465,16 @@ function render() {
   showStorageError(loaded.error || (adapter.available ? '' : 'Browser storage is unavailable. Data will not persist after refresh.'));
 }
 
-function proposedEndText(state, now) {
+function proposedEndDetails(state, now) {
   const todayKey = dateKeyFromDate(now);
   const vacationMinutes = vacationMinutesForDate(state.entries, todayKey);
   const target = dailyTargetMinutes(state.settings, todayKey, state.entries);
-  if (target === 0) return vacationMinutes ? 'Vacation day' : 'No scheduled target';
+  if (target === 0) {
+    return {
+      time: '\u2014',
+      detail: vacationMinutes ? 'Vacation day' : 'No scheduled target',
+    };
+  }
 
   const worked = dailyWorkedMinutes(state.entries, state.activeTimer, todayKey, now);
   const { start, end } = getWeekRange(now);
@@ -479,15 +487,25 @@ function proposedEndText(state, now) {
   // Catch up any deficit accumulated earlier in the week before stopping today.
   // When the week is already ahead, keep today's work aligned with today's target
   // while there is still scheduled work left later in the week.
-  const remaining = currentWeekBalance < 0
-    ? -currentWeekBalance
-    : Math.max(0, target - worked);
-
-  if (currentWeekBalance > 0 && currentWeekBalance >= remainingWeekWorkTime) {
-    return `Week target reached - ${formatDuration(currentWeekBalance - remainingWeekWorkTime)} over`;
+  let remaining;
+  let detail;
+  if (currentWeekBalance < 0) {
+    remaining = -currentWeekBalance;
+    detail = `${formatDuration(remaining)} left`;
+  } else if (currentWeekBalance > 0 && currentWeekBalance >= remainingWeekWorkTime) {
+    remaining = 0;
+    detail = `${formatDuration(currentWeekBalance - remainingWeekWorkTime)} over`;
+  } else {
+    remaining = Math.max(0, target - worked);
+    detail = currentWeekBalance > 0
+      ? `${formatDuration(currentWeekBalance)} over`
+      : remaining > 0 ? `${formatDuration(remaining)} left` : 'On target';
   }
-  if (remaining === 0) return `Target reached - ${formatDuration(worked - target)} over`;
-  return `${formatTime(new Date(now.getTime() + remaining * 60 * 1000))} today`;
+
+  return {
+    time: formatTime(new Date(now.getTime() + remaining * MINUTE)),
+    detail,
+  };
 }
 
 function renderTodayTimer(state, now) {
